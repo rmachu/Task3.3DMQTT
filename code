@@ -1,0 +1,138 @@
+#include <WiFiNINA.h>       // Include the Wi-Fi library 
+#include <PubSubClient.h>   // Include the PubSubClient library
+#include "secrets.h"
+
+#define TRIG_PIN   3 // Pin connected to TRIG pin of ultrasonic sensor
+#define ECHO_PIN   2 // Pin connected to ECHO pin of ultrasonic sensor
+#define LED        13 //Pin connected to the LED
+
+void wave();
+void pat();
+float duration_us, distance_cm; //variables for sensor
+
+//Wifi details 
+char ssid[] = SECRET_SSID; 
+char password[] = SECRET_PASS;
+
+// MQTT broker details
+const char* mqtt_server = "broker.emqx.io";
+const int mqtt_port = 1883;  
+
+WiFiClient wifiClient;
+PubSubClient client(wifiClient);
+
+void setWifi() {
+  Serial.begin(115200);
+  delay(10);
+
+  // Connect to Wi-Fi
+  Serial.println();
+  Serial.print("Connecting to ");
+  Serial.println(ssid);
+  WiFi.begin(ssid, password);
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  //connect message 
+  Serial.println("");
+  Serial.println("WiFi connected");
+  Serial.println("IP address: ");
+  Serial.println(WiFi.localIP());
+}
+
+//Print out messages being received through the subsribed topic 
+void callback(char* topic, byte* payload, unsigned int length) {
+  Serial.print("Message received on topic: ");
+  Serial.println(topic);
+  
+  Serial.print("Message: ");
+  for (int i = 0; i < length; i++) {
+    Serial.print((char)payload[i]);
+  }
+  Serial.println();
+}
+
+//Connect to MQTT broker 
+void MQTTconnect() {
+  // Loop until we're reconnected
+  while (!client.connected()) {
+    Serial.print("Attempting MQTT connection...");
+    // Attempt to connect
+    if (client.connect("arduinoClient")) {
+      Serial.println("connected"); //connect message
+      client.subscribe("SIT210/wave"); //subscrube to topic
+    } else {
+      Serial.print("failed to connect ");
+      Serial.print(client.state());
+      // Wait 5 seconds before retrying
+      delay(5000);
+    }
+  }
+}
+
+void setup() {
+
+  setWifi();
+
+  client.setServer(mqtt_server, mqtt_port);
+  client.setCallback(callback); 
+
+  pinMode(TRIG_PIN, OUTPUT);
+  pinMode(ECHO_PIN, INPUT);
+  pinMode(LED, OUTPUT);
+}
+
+void loop() {
+  if (!client.connected()) {
+    MQTTconnect();
+  }
+  //start sensor
+  digitalWrite(TRIG_PIN, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(TRIG_PIN, LOW);
+  duration_us = pulseIn(ECHO_PIN, HIGH);
+  distance_cm = 0.017 * duration_us; //calculation of distance
+  Serial.print("distance: "); //print distance
+  Serial.print(distance_cm);
+  Serial.println(" cm");
+  delay(5000); //5 second pause between readings
+
+  //wave function is called if distance is between 60 and 10 
+  if (distance_cm < 60 && distance_cm > 10)
+  {
+    wave();
+    client.publish("SIT210/wave", "Rachel wave"); //message published 
+  }
+  //pat function is called if distance is less than 10
+  if (distance_cm < 10)
+  {
+    pat();
+    client.publish("SIT210/wave", "Rachel pat"); //message published 
+  }
+
+  client.loop();
+}
+
+void wave()
+{ //LED flashing pattern for wave
+  for (int i = 0; i < 3; i++) {
+    digitalWrite(LED, HIGH);
+    delay(500);
+    digitalWrite(LED, LOW);
+    delay(500);
+  }
+}
+
+void pat()
+{ //LED flashing pattern for pat
+  digitalWrite(LED, HIGH);
+  delay(1000);
+  digitalWrite(LED, LOW);    
+  delay(400); 
+  digitalWrite(LED, HIGH);
+  delay(400);
+  digitalWrite(LED, LOW); 
+}
